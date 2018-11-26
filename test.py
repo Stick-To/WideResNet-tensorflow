@@ -23,9 +23,9 @@ num_classes = 10
 train_batch_size = 128
 test_batch_size = 200
 epochs = 200
-weight_decay = 1e-4
-keep_prob = 0.8
-lr = 0.01
+weight_decay = 5e-4
+keep_prob = 0.7
+lr = 0.1
 
 (x_train, y_train),(x_test, y_test) = cifar10.load_data()
 y_train = keras.utils.to_categorical(y_train, num_classes)
@@ -39,7 +39,7 @@ train_gen = ImageDataGenerator(
 ).flow(x_train, y_train, batch_size=train_batch_size)
 test_gen = ImageDataGenerator().flow(x_test, y_test, batch_size=test_batch_size)
 
-reduce_lr_epoch = [25, 125]
+reduce_lr_epoch = [60, 120, 160]
 # [n, k]   ------------->WRN-n-k
 testnet = net.WideResNet([28, 2], data_shape, num_classes, weight_decay, keep_prob, 'channels_last')
 for epoch in range(epochs):
@@ -48,11 +48,8 @@ for epoch in range(epochs):
     train_loss = []
     test_acc = []
     # reduce learning rate
-    if epoch == 1:
-        lr = 0.1
-        print('warm up  learning rate =', lr, 'now')
     if epoch in reduce_lr_epoch:
-        lr = lr * 0.1
+        lr = lr * 0.2
         print('reduce learning rate =', lr, 'now')
     # train one epoch
     for iter in range(num_train//train_batch_size):

@@ -3,7 +3,6 @@ from __future__ import division
 from __future__ import print_function
 import tensorflow as tf
 import os
-os.environ['TF_CPP_MIN_LEVEL'] = '2'
 
 
 class WideResNet:
@@ -50,10 +49,12 @@ class WideResNet:
                 residual_block = self._residual_block(residual_block, 32*self.k, 2, 'group_conv3/conv'+str(i+1))
             for i in range(self.N):
                 residual_block = self._residual_block(residual_block, 64*self.k, 2, 'group_conv4/conv'+str(i+1))
-            residual_block = tf.nn.relu(residual_block)
+        with tf.variable_scope('after_spliting'):
+            bn = self._bn(residual_block)
+            relu = tf.nn.relu(bn)
         with tf.variable_scope('group_avg_pool'):
             axes = [1, 2] if self.data_format == 'channels_last' else [2, 3]
-            global_pool = tf.reduce_mean(residual_block, axis=axes, keepdims=False, name='global_pool')
+            global_pool = tf.reduce_mean(relu, axis=axes, keepdims=False, name='global_pool')
             final_dense = tf.layers.dense(global_pool, self.num_classes, name='final_dense')
         with tf.variable_scope('optimizer'):
             self.logit = tf.nn.softmax(final_dense, name='logit')
@@ -145,6 +146,14 @@ class WideResNet:
         else:
             raise FileNotFoundError('Not Found Model File!')
 
+    def _bn(self, bottom):
+        bn = tf.layers.batch_normalization(
+            inputs=bottom,
+            axis=3 if self.data_format == 'channels_last' else 1,
+            training=self.is_training
+        )
+        return bn
+
     def _conv_bn_activation(self, bottom, filters, kernel_size, strides, activation=tf.nn.relu):
         conv = tf.layers.conv2d(
             inputs=bottom,
@@ -155,22 +164,14 @@ class WideResNet:
             data_format=self.data_format,
             kernel_initializer=tf.contrib.layers.variance_scaling_initializer()
         )
-        bn = tf.layers.batch_normalization(
-            inputs=conv,
-            axis=3 if self.data_format == 'channels_last' else 1,
-            training=self.is_training
-        )
+        bn = self._bn(conv)
         if activation is not None:
             return activation(bn)
         else:
             return bn
 
     def _bn_activation_conv(self, bottom, filters, kernel_size, strides, activation=tf.nn.relu):
-        bn = tf.layers.batch_normalization(
-            inputs=bottom,
-            axis=3 if self.data_format == 'channels_last' else 1,
-            training=self.is_training
-        )
+        bn = self._bn(bottom)
         if activation is not None:
             bn = activation(bn)
         conv = tf.layers.conv2d(
@@ -191,7 +192,15 @@ class WideResNet:
                 dropout = self._dropout(conv, 'dropout')
                 conv = self._bn_activation_conv(dropout, filters, 3, 1)
             with tf.variable_scope('identity_branch'):
-                shutcut = self._bn_activation_conv(bottom, filters, 3, strides)
+                if strides != 1:
+                    shutcut = self._bn_activation_conv(bottom, filters, 1, strides)
+                else:
+                    index = 3 if self.data_format == 'channels_last' else 1
+                    if tf.shape(bottom)[index] != filters:
+                        shutcut = self._bn_activation_conv(bottom, filters, 1, strides)
+                    else:
+                        shutcut = bottom
+
             return conv + shutcut
 
     def _max_pooling(self, bottom, pool_size, strides, name):
